@@ -7,6 +7,7 @@ from pathlib import Path
 DEFAULT_DATABASE_PATH = (
     Path.home() / "Library" / "Application Support" / "Dachik" / "dachik.sqlite3"
 )
+BROWSER_VERIFICATION_ENVIRONMENT = "browser-verification"
 
 
 def _cors_origins_from_environment() -> tuple[str, ...]:
@@ -24,3 +25,15 @@ class Settings:
         ).expanduser()
     )
     cors_origins: tuple[str, ...] = field(default_factory=_cors_origins_from_environment)
+    runtime_environment: str = field(
+        default_factory=lambda: os.getenv("DACHIK_ENVIRONMENT", "development")
+    )
+
+    def __post_init__(self) -> None:
+        if self.runtime_environment != BROWSER_VERIFICATION_ENVIRONMENT:
+            return
+        configured_path = self.database_path.expanduser().resolve()
+        if configured_path == DEFAULT_DATABASE_PATH.resolve():
+            raise ValueError(
+                "Browser verification must not use the normal Dachik development database"
+            )

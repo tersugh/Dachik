@@ -9,7 +9,9 @@ description = "Privacy-first independent internet data-usage sensor"
 readme = "README.md"
 requires-python = ">=3.12,<3.13"
 dependencies = [
+  "alembic>=1.14,<2.0",
   "fastapi>=0.115,<1.0",
+  "sqlalchemy>=2.0,<3.0",
   "uvicorn[standard]>=0.32,<1.0",
 ]
 
@@ -39,4 +41,3 @@ select = ["E", "F", "I", "UP", "B", "SIM"]
 python_version = "3.12"
 strict = true
 files = ["backend", "collector"]
-

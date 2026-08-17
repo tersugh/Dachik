@@ -1,19 +1,39 @@
 from pathlib import Path
 
-from backend.app.database import SCHEMA_VERSION, Database
+from sqlalchemy import inspect, text
+
+from backend.app.database import Database
+
+EXPECTED_TABLES = {
+    "alembic_version",
+    "applications",
+    "application_usage",
+    "collector_runs",
+    "counter_observations",
+    "counter_series",
+    "data_audit_experiments",
+    "data_bundles",
+    "devices",
+    "isp_balance_snapshots",
+    "measurement_discontinuities",
+    "traffic_sources",
+    "usage_intervals",
+}
 
 
-def test_initialize_creates_configured_database(database_path: Path) -> None:
+def test_initialize_applies_migrations_and_sqlite_policy(database_path: Path) -> None:
     database = Database(database_path)
 
     database.initialize()
+    database.initialize()
 
     assert database_path.is_file()
-    with database.connect() as connection:
-        version = connection.execute("PRAGMA user_version").fetchone()[0]
-        foreign_keys = connection.execute("PRAGMA foreign_keys").fetchone()[0]
-        journal_mode = connection.execute("PRAGMA journal_mode").fetchone()[0]
+    assert set(inspect(database.engine).get_table_names()) >= EXPECTED_TABLES
+    with database.engine.connect() as connection:
+        revision = connection.execute(text("SELECT version_num FROM alembic_version")).scalar_one()
+        foreign_keys = connection.execute(text("PRAGMA foreign_keys")).scalar_one()
+        journal_mode = connection.execute(text("PRAGMA journal_mode")).scalar_one()
 
-    assert version == SCHEMA_VERSION
+    assert revision == "15ac772ee7c5"
     assert foreign_keys == 1
     assert journal_mode == "wal"
