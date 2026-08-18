@@ -2,7 +2,7 @@
 
 **Know where your data goes.**
 
-Dachik is a privacy-first, independent internet data-usage sensor and ISP-accounting comparison tool. It is currently under development. This repository contains the V1 persistence and Data Audit Experiment foundation; it does **not** measure real traffic yet.
+Dachik is a privacy-first, independent internet data-usage sensor and ISP-accounting comparison tool. It is currently under development. The V1 collector now measures cumulative RX/TX byte counters for one selected local macOS network interface and derives restart-safe usage intervals.
 
 V1 is a local-first macOS application: a Python collector will supply cumulative interface counters to a deterministic accounting engine, SQLite will persist local data, FastAPI will expose a loopback-only API, and a React browser UI will present the results. See [the architecture](docs/ARCHITECTURE.md) for the authoritative design.
 
@@ -37,7 +37,23 @@ The `.env` file contains public browser configuration only. Never place secrets 
 
 ## Run locally
 
-Use two terminals from the repository root.
+Install and start the user-level development sensor once from the repository root:
+
+```bash
+source venv/bin/activate
+python -m collector service install
+python -m collector service start
+python -m collector service status
+```
+
+The sensor then runs independently of the browser, Vite, FastAPI, and any open
+terminal. It starts at login and launchd restarts it after an unexpected failure,
+with a five-minute throttle to avoid tight configuration-error loops. It uses the
+current virtual environment's exact Python executable and the normal local Dachik
+database. Moving or deleting this repository or `venv/` invalidates this
+development configuration; production installer integration remains deferred.
+
+Use two terminals for the local API and browser UI.
 
 Terminal 1 — start FastAPI on loopback:
 
@@ -54,6 +70,98 @@ npm run dev
 ```
 
 Open [http://127.0.0.1:5173](http://127.0.0.1:5173). The page calls [http://127.0.0.1:8765/health](http://127.0.0.1:8765/health) and shows the local service status.
+
+### Development sensor lifecycle
+
+All lifecycle commands are user-level and require no `sudo`:
+
+```bash
+python -m collector service install
+python -m collector service start
+python -m collector service stop
+python -m collector service restart
+python -m collector service status
+python -m collector service uninstall
+```
+
+Installation writes only
+`~/Library/LaunchAgents/io.dachik.collector.development.plist`, with user-only
+permissions. Uninstall verifies Dachik ownership before removing that file and
+does not delete measurements, the database, or unrelated LaunchAgents. The
+collector's privacy-safe rotating diagnostic log is stored at
+`~/Library/Application Support/Dachik/logs/collector.log` (1 MB per file, three
+backups). launchd stdout and stderr are discarded so they cannot grow without
+bound.
+
+The development policy keeps the collector available continuously. It records
+counters locally and attributes only compatible intervals inside the one active
+plan's tracking window. With no active plan, it does not invent plan usage.
+Sleep, long sampling gaps, interface changes, and process restarts establish new
+baselines/discontinuities rather than fabricating traffic.
+
+The data-plan audit remains active across those breaks. Accepted measurement
+periods before and after a safe new baseline accumulate against the original
+network balance recorded when tracking began. Dachik separates measured time,
+known non-attributable time, and unknown time; none of the latter two is silently
+converted to zero usage. The current coverage percentage means accepted measured
+duration divided by eligible tracking duration—it is not a confidence score.
+
+V1 tracks one explicitly selected current plan on this Mac. Starting another
+plan requires confirming a switch; the previous audit is not automatically
+completed or deleted. If legacy development data contains multiple active audits
+without a current selection, Dachik refuses to choose the newest row and asks the
+user to select a plan.
+
+For Wi-Fi attribution, the collector binds the active plan to an opaque SHA-256
+fingerprint derived locally from the current network name and default gateway.
+The underlying network name is not persisted or logged. A changed or
+unidentifiable connection is not counted merely because macOS continues using
+the same physical interface name.
+
+For debugging only, run the collector interactively:
+
+```bash
+source venv/bin/activate
+python -m collector monitor
+```
+
+The development defaults sample every 10 seconds and reject gaps longer than 30 seconds. They can be configured explicitly for either a reinstall or an interactive run:
+
+```bash
+python -m collector service stop
+python -m collector service install --interval 10 --max-gap 30
+python -m collector service start
+
+# Or interactive debugging:
+python -m collector monitor --interval 10 --max-gap 30
+```
+
+The collector selects the active physical `en` interface used by the IPv4 default route. To make an intentional physical-interface selection:
+
+```bash
+python -m collector monitor --interface en0
+```
+
+The collector refuses virtual/default interfaces it cannot classify safely and never sniffs packets. Stop an interactive run with Ctrl+C; every completed observation is committed before the next sleep. Do not run the interactive collector at the same time as the background service.
+
+An audit created before connection fingerprinting is never rebound silently. With
+the Mac connected to the network used by the active data plan, explicitly confirm
+that connection once, then restart the development sensor:
+
+```bash
+python -m collector connection confirm
+python -m collector service restart
+```
+
+The command refuses to guess if a development database contains multiple active
+audits. In that exceptional development-only case, inspect the records and pass
+the intended audit explicitly with `--experiment-id`; the consumer UI will not
+expose this internal identifier.
+
+The confirmation stores only an opaque connection fingerprint on the existing
+traffic source. It does not expose the network name, replace the active audit,
+change its starting balance, or rewrite observations, intervals, or ISP balance
+evidence.
 
 ### Isolated browser verification
 
@@ -122,7 +230,7 @@ npm run build
 ## Repository structure
 
 ```text
-collector/           Provider-neutral traffic contracts; no real collector yet
+collector/           Provider contract, macOS counters, monitor, and LaunchAgent lifecycle
 backend/app/         Domain models, services, repositories, API, and SQLite lifecycle
 backend/tests/       Domain, migration, API, persistence, and health tests
 frontend/src/        React audit workflow, typed API client, and component tests
@@ -145,9 +253,12 @@ The current local API provides:
 - `POST /api/v1/experiments/{id}/start`
 - `POST /api/v1/experiments/{id}/complete`
 - `GET/POST /api/v1/experiments/{id}/isp-snapshots`
+- `GET /api/v1/measurement/status`
+- `GET /api/v1/usage/current-experiment` (accepts an optional timezone-aware
+  `as_of` timestamp for deterministic point-in-time accounting)
 
-The browser UI gives users one consumer workflow: describe a data plan, declare its current network-reported balance, and start tracking. It composes the existing device, bundle, experiment, and immutable snapshot APIs internally. The active-plan screen intentionally says **“Measurement sensor not running yet.”** because traffic collection is not part of this phase.
+The browser UI gives users one consumer workflow: describe a data plan, declare its current network-reported balance, and start tracking. When the collector has derived valid intervals, the active-plan screen shows usage observed by Dachik and an accounted remainder. Missing observations remain unknown, known gaps are disclosed, and the provider-reported balance remains separate.
 
 ## Privacy principle
 
-Dachik stores counters and only the minimum metadata needed for accounting. It must not collect packet payloads, browsing content, URLs, DNS history, page titles, messages, or passwords. Data remains local by default, and a discrepancy must never be presented automatically as proof of ISP fraud.
+Dachik stores cumulative interface counters, derived byte intervals, continuity metadata, and only the minimum metadata needed for accounting. It does not collect packet payloads, browsing content, URLs, DNS history, page titles, messages, or passwords. V1 observes this Mac only—not other phones, hotspot clients, or router-wide traffic. Data remains local by default, and a discrepancy must never be presented automatically as proof of ISP fraud.

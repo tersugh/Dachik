@@ -90,6 +90,10 @@ class ExperimentResponse(ExperimentCreate):
     created_at: datetime
 
 
+class CurrentTrackingSelection(APIModel):
+    experiment_id: str
+
+
 class ISPBalanceSnapshotCreate(APIModel):
     timestamp_utc: datetime
     reported_value: str = Field(min_length=1, max_length=100)
@@ -154,3 +158,72 @@ class CounterObservationCreate(APIModel):
         if value.tzinfo is None or value.utcoffset() is None:
             raise ValueError("timestamp must include a timezone offset")
         return value
+
+
+class InterfaceObservationCreate(APIModel):
+    download: CounterObservationCreate
+    upload: CounterObservationCreate
+
+    @model_validator(mode="after")
+    def require_paired_observation(self) -> "InterfaceObservationCreate":
+        if self.download.timestamp_utc != self.upload.timestamp_utc:
+            raise ValueError("paired observations must have the same timestamp")
+        if self.download.session_id != self.upload.session_id:
+            raise ValueError("paired observations must have the same session")
+        if self.download.sequence_key != self.upload.sequence_key:
+            raise ValueError("paired observations must have the same sequence key")
+        return self
+
+
+class MeasurementStatusResponse(APIModel):
+    status: Literal[
+        "no_active_plan",
+        "multiple_active_plans",
+        "waiting",
+        "active",
+        "paused",
+        "interrupted",
+        "unavailable",
+        "ambiguous",
+    ]
+    latest_observation_at: datetime | None
+    interface_name: str | None
+    service_installed: bool
+    service_expected_to_run: bool
+    collector_run_status: str | None
+    message: str
+
+
+class CurrentExperimentUsageResponse(APIModel):
+    experiment_id: str | None
+    status: Literal[
+        "no_active_plan",
+        "multiple_active_plans",
+        "waiting",
+        "active",
+        "paused",
+        "interrupted",
+        "unavailable",
+        "ambiguous",
+    ]
+    tracking_started_at: datetime | None
+    as_of_timestamp: datetime
+    latest_observation_at: datetime | None
+    observed_rx_bytes: int | None
+    observed_tx_bytes: int | None
+    total_observed_bytes: int | None
+    tracking_baseline_bytes: int | None
+    latest_provider_balance_bytes: int | None
+    accounted_remainder_bytes: int | None
+    covered_duration_seconds: int
+    eligible_duration_seconds: int
+    coverage_percent: float | None
+    known_inactive_duration_seconds: int
+    unknown_duration_seconds: int
+    has_coverage_gaps: bool
+    has_unknown_gaps: bool
+    interface_name: str | None
+    service_installed: bool
+    service_expected_to_run: bool
+    collector_run_status: str | None
+    message: str

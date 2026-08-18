@@ -7,8 +7,14 @@ import {
   type Device,
   type Experiment,
   type ISPBalanceSnapshot,
+  type CurrentExperimentUsage,
 } from "../api/client";
-import { bundleSizeToBytes, formatBundleSize, type BundleUnit } from "../domain/bundleSize";
+import {
+  bundleSizeToBytes,
+  formatBundleSize,
+  formatObservedBytes,
+  type BundleUnit,
+} from "../domain/bundleSize";
 
 type ValidityChoice = "7" | "14" | "30" | "custom";
 type StartingBalanceChoice = "new" | "used";
@@ -56,6 +62,13 @@ function combineSourceAndNote(source: string, note: string): string | null {
   return parts.length ? parts.join(" · ") : null;
 }
 
+function trackingLabel(status: CurrentExperimentUsage["status"] | undefined): string {
+  if (status === "active") return "Active";
+  if (status === "paused" || status === "interrupted") return "Paused";
+  if (status === "unavailable" || status === "ambiguous") return "Unavailable";
+  return "Starting…";
+}
+
 interface ExperimentWorkspaceProps {
   api?: DachikApi;
 }
@@ -73,15 +86,24 @@ export function ExperimentWorkspace({ api = dachikApi }: ExperimentWorkspaceProp
   const [customExpiry, setCustomExpiry] = useState("");
   const [startingBalance, setStartingBalance] = useState<StartingBalanceChoice>("new");
   const [showAnotherPlan, setShowAnotherPlan] = useState(false);
+  const [showSwitchPrompt, setShowSwitchPrompt] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [busyAction, setBusyAction] = useState<string | null>(null);
+  const [usage, setUsage] = useState<CurrentExperimentUsage | null>(null);
 
-  const activeExperiment = useMemo(
-    () => experiments.find((experiment) => experiment.status === "active") ?? null,
+  const activeExperiments = useMemo(
+    () => experiments.filter((experiment) => experiment.status === "active"),
     [experiments],
   );
+  const activeExperiment = useMemo(() => {
+    if (usage?.experiment_id) {
+      return experiments.find((experiment) => experiment.id === usage.experiment_id) ?? null;
+    }
+    if (usage?.status === "multiple_active_plans") return null;
+    return activeExperiments.length === 1 ? activeExperiments[0] ?? null : null;
+  }, [activeExperiments, experiments, usage]);
   const activeBundle = useMemo(
     () => bundles.find((bundle) => bundle.id === activeExperiment?.data_bundle_id) ?? null,
     [activeExperiment, bundles],
@@ -130,6 +152,27 @@ export function ExperimentWorkspace({ api = dachikApi }: ExperimentWorkspaceProp
       mounted = false;
     };
   }, [activeExperiment, api]);
+
+  useEffect(() => {
+    if (loading) return;
+    let mounted = true;
+    const refreshUsage = () => {
+      void api
+        .getCurrentExperimentUsage()
+        .then((value) => {
+          if (mounted) setUsage(value);
+        })
+        .catch((reason: unknown) => {
+          if (mounted) setError(reason instanceof Error ? reason.message : "Dachik could not load measured usage");
+        });
+    };
+    refreshUsage();
+    const timer = window.setInterval(refreshUsage, 10_000);
+    return () => {
+      mounted = false;
+      window.clearInterval(timer);
+    };
+  }, [api, loading]);
 
   async function run(actionName: string, action: () => Promise<void>) {
     if (busyAction) return;
@@ -181,7 +224,7 @@ export function ExperimentWorkspace({ api = dachikApi }: ExperimentWorkspaceProp
         methodology_version: "v1-foundation",
         user_notes: null,
       });
-      const tracking = await api.startExperiment(draft.id);
+      const tracking = await api.startExperiment(draft.id, showAnotherPlan);
       const reportedValue =
         startingBalance === "new" ? amount : String(data.get("current_balance")).trim();
       const reportedUnit = startingBalance === "new" ? bundleUnit : balanceUnit;
@@ -199,9 +242,20 @@ export function ExperimentWorkspace({ api = dachikApi }: ExperimentWorkspaceProp
       });
       setExperiments((current) => [tracking, ...current]);
       setSnapshots([initialBalance]);
+      setUsage(null);
       setShowAnotherPlan(false);
+      setShowSwitchPrompt(false);
       setSuccess("Tracking setup complete.");
       form.reset();
+    });
+  }
+
+  function chooseCurrentPlan(experiment: Experiment) {
+    void run("choose-plan", async () => {
+      await api.selectCurrentExperiment(experiment.id);
+      const currentUsage = await api.getCurrentExperimentUsage();
+      setUsage(currentUsage);
+      setSuccess("Tracking plan selected.");
     });
   }
 
@@ -257,7 +311,44 @@ export function ExperimentWorkspace({ api = dachikApi }: ExperimentWorkspaceProp
       {error && <p className="form-error" role="alert">{error}</p>}
       {success && <p className="form-success" role="status">{success}</p>}
 
-      {showSetup ? (
+      {usage?.status === "multiple_active_plans" ? (
+        <div className="plan-setup">
+          <div className="section-heading">
+            <p className="eyebrow">Choose your data plan</p>
+            <h2 id="plan-heading">Dachik found more than one active data plan.</h2>
+            <p>Choose which one you want to track on this Mac.</p>
+          </div>
+          <div className="plan-choice-list">
+            {activeExperiments.map((experiment) => {
+              const bundle = bundles.find((item) => item.id === experiment.data_bundle_id);
+              if (!bundle) return null;
+              return (
+                <div className="panel" key={experiment.id}>
+                  <strong>{bundle.provider_name} · {formatBundleSize(bundle.allowance_bytes)}</strong>
+                  <span>{bundle.plan_name}</span>
+                  <span>Valid until {friendlyDate(bundle.billing_cycle_end)}</span>
+                  <button disabled={busy} type="button" onClick={() => chooseCurrentPlan(experiment)}>
+                    Track this plan
+                  </button>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      ) : showSwitchPrompt && activeBundle ? (
+        <div className="plan-setup">
+          <div className="section-heading">
+            <p className="eyebrow">You’re already tracking</p>
+            <h2 id="plan-heading">{activeBundle.provider_name} · {formatBundleSize(activeBundle.allowance_bytes)}</h2>
+            <p>{activeBundle.plan_name} · Valid until {friendlyDate(activeBundle.billing_cycle_end)}</p>
+            <p>Dachik currently tracks one data plan on this Mac at a time.</p>
+          </div>
+          <div className="button-row">
+            <button type="button" onClick={() => setShowSwitchPrompt(false)}>Keep tracking this plan</button>
+            <button className="secondary" type="button" onClick={() => { setShowSwitchPrompt(false); setShowAnotherPlan(true); }}>Switch tracking plan</button>
+          </div>
+        </div>
+      ) : showSetup ? (
         <div className="plan-setup">
           <div className="section-heading">
             <p className="eyebrow">Add your data plan</p>
@@ -313,14 +404,26 @@ export function ExperimentWorkspace({ api = dachikApi }: ExperimentWorkspaceProp
               <h2 id="plan-heading">{activeBundle.provider_name} · {formatBundleSize(activeBundle.allowance_bytes)}</h2>
               <p className="plan-name">{activeBundle.plan_name}</p>
             </div>
-            <button className="secondary compact" type="button" onClick={() => setShowAnotherPlan(true)}>Track another plan</button>
+            <button className="secondary compact" type="button" onClick={() => setShowSwitchPrompt(true)}>Track another plan</button>
           </div>
           <dl className="plan-facts">
             <div><dt>Valid until</dt><dd>{friendlyDate(activeBundle.billing_cycle_end)}</dd></div>
             <div><dt>This Mac</dt><dd>{activeDevice?.display_name ?? "Local Mac"}</dd></div>
             <div><dt>Current network balance</dt><dd>{latestBalance ? `${latestBalance.reported_value} ${latestBalance.reported_unit}` : "Unknown"}</dd></div>
+            <div><dt>Tracking</dt><dd>{trackingLabel(usage?.status)}</dd></div>
           </dl>
-          <div className="sensor-notice"><strong>Tracking setup complete</strong><span>Measurement sensor not running yet.</span></div>
+          {usage?.total_observed_bytes === null || !usage ? (
+            <div className="sensor-notice"><strong>Tracking setup complete</strong><span>{usage?.message ?? "Waiting for the first measurement."}</span></div>
+          ) : (
+            <div className="usage-summary">
+              <div><span>Used according to Dachik</span><strong>{formatObservedBytes(usage.total_observed_bytes)}</strong></div>
+              <div><span>Accounted remainder</span><strong>{usage.accounted_remainder_bytes === null ? "Unknown" : formatObservedBytes(usage.accounted_remainder_bytes)}</strong></div>
+              <p>Starts from the network balance recorded when tracking began and subtracts only traffic Dachik observed on this Mac. It is not your network’s official balance.</p>
+            </div>
+          )}
+          {usage?.total_observed_bytes !== null && (usage?.status === "paused" || usage?.status === "interrupted") && <p className="coverage-warning">Tracking is currently paused.</p>}
+          {usage?.total_observed_bytes !== null && (usage?.status === "unavailable" || usage?.status === "ambiguous") && <p className="coverage-warning">Tracking is currently unavailable.</p>}
+          {usage?.has_unknown_gaps && <p className="coverage-warning">Some usage may not have been observed during an earlier tracking gap.</p>}
 
           <form className="balance-form panel" onSubmit={updateBalance}>
             <h3>Update network balance</h3>

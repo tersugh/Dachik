@@ -150,6 +150,12 @@ delta = current_counter - previous_counter, when current_counter >= previous_cou
 
 If the counter decreases, the boot/session changes, the interface disappears, the source changes, or the gap exceeds the configured continuity threshold, close the prior segment. Treat the first value in the new segment as a baseline with zero attributable delta—never as usage since zero. Record a discontinuity reason and expose the resulting coverage gap.
 
+Audit continuity does not require counter continuity. A bundle experiment remains active across sleep, shutdown, collector restarts, connection changes, and sensor failures. Trustworthy intervals before and after a break accumulate against the experiment's original immutable starting-balance evidence; a new OS baseline never resets that audit balance. Higher-level audit periods are derived from accepted `UsageInterval` evidence and classified discontinuities rather than stored as mutable balances. Periods distinguish measured time, deterministically known non-attributable time, and unknown time. Unknown time is never usage of zero.
+
+V1 measures one explicitly selected current data plan on this Mac at a time. Current measurement targeting is separate from experiment lifecycle: switching the target does not complete, cancel, or rewrite another valid audit. A singleton selection identifies the current target. With no selection, exactly one active compatible audit may be used deterministically; multiple active audits are an explicit conflict and must never be resolved by timestamp order.
+
+The physical interface name alone is not sufficient connection identity: the same `en0` may carry unrelated Wi-Fi networks. V1 persists only an opaque hash of privacy-safe local connection identity evidence and binds an experiment to that source. A clearly different or unidentifiable connection is not attributed to the plan. This describes only the local Mac measurement boundary and does not prove whether the ISP bundle was used elsewhere.
+
 Persist observations before deriving rollups, make ingestion idempotent with a source/session/sequence key, and commit each interval atomically. After a Dachik restart, continue only from a compatible persisted baseline. Do not bridge sleep, shutdown, or collection gaps without evidence that the underlying cumulative counter remained continuous. Wall-clock time defines reporting buckets; monotonic time detects elapsed intervals and clock changes. Split an interval crossing a day or billing boundary only with an explicitly documented allocation rule; otherwise keep it in its observed interval and flag boundary uncertainty.
 
 ### ISP comparison
@@ -174,6 +180,8 @@ coverage % = reliably observed duration within the comparison interval
 ```
 
 Only accepted, continuous intervals from the selected authoritative counter series count as reliably observed. Time outside the experiment, collector downtime, incompatible source/scope changes, unresolved resets, excessive sampling gaps, and ambiguous interface periods remain explicit coverage gaps. Overlapping samples count once. Missing intervals are never zero usage and Dachik must not extrapolate them into measured bytes.
+
+The current V1 percentage is specifically accepted measured duration divided by eligible tracking duration. Known non-attributable and unknown durations are exposed separately and neither is counted as measured. This duration ratio is evidence coverage, not a confidence score and not proof of zero bundle use outside the local measurement boundary.
 
 Initial user-facing categories are:
 

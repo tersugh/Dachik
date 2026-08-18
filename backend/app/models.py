@@ -264,6 +264,21 @@ class DataAuditExperiment(Base):
     created_at: Mapped[datetime] = mapped_column(UTCDateTime(), default=utc_now)
 
 
+class CurrentTrackingTarget(Base):
+    """Singleton V1 selection, deliberately separate from audit lifecycle."""
+
+    __tablename__ = "current_tracking_target"
+    __table_args__ = (
+        CheckConstraint("id = 1", name="ck_current_tracking_target_singleton"),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True, default=1)
+    experiment_id: Mapped[str] = mapped_column(
+        ForeignKey("data_audit_experiments.id", ondelete="RESTRICT"), unique=True
+    )
+    selected_at: Mapped[datetime] = mapped_column(UTCDateTime(), default=utc_now)
+
+
 class ISPBalanceSnapshot(Base):
     __tablename__ = "isp_balance_snapshots"
     __table_args__ = (

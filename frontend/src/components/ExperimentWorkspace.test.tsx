@@ -2,6 +2,7 @@ import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/re
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import type {
+  CurrentExperimentUsage,
   DachikApi,
   DataBundle,
   Device,
@@ -51,6 +52,32 @@ const active: Experiment = {
   started_at: "2026-08-17T00:01:00Z",
 };
 
+const waitingUsage: CurrentExperimentUsage = {
+  experiment_id: active.id,
+  status: "waiting",
+  tracking_started_at: active.started_at,
+  as_of_timestamp: "2026-08-17T00:01:10Z",
+  latest_observation_at: null,
+  observed_rx_bytes: null,
+  observed_tx_bytes: null,
+  total_observed_bytes: null,
+  tracking_baseline_bytes: null,
+  latest_provider_balance_bytes: null,
+  accounted_remainder_bytes: null,
+  covered_duration_seconds: 0,
+  eligible_duration_seconds: 10,
+  coverage_percent: 0,
+  known_inactive_duration_seconds: 0,
+  unknown_duration_seconds: 0,
+  has_coverage_gaps: false,
+  has_unknown_gaps: false,
+  interface_name: null,
+  service_installed: false,
+  service_expected_to_run: false,
+  collector_run_status: null,
+  message: "Waiting for the first measurement.",
+};
+
 function snapshot(
   reportedValue: string,
   reportedUnit: string,
@@ -80,11 +107,13 @@ function createApi(overrides: Partial<DachikApi> = {}): DachikApi {
     listExperiments: vi.fn().mockResolvedValue([]),
     createExperiment: vi.fn().mockResolvedValue(draft),
     startExperiment: vi.fn().mockResolvedValue(active),
+    selectCurrentExperiment: vi.fn().mockResolvedValue(active),
     completeExperiment: vi.fn(),
     listSnapshots: vi.fn().mockResolvedValue([]),
     createSnapshot: vi.fn().mockImplementation((_id, payload) =>
       Promise.resolve(snapshot(payload.reported_value, payload.reported_unit, payload.note)),
     ),
+    getCurrentExperimentUsage: vi.fn().mockResolvedValue(waitingUsage),
     ...overrides,
   };
 }
@@ -126,14 +155,14 @@ describe("consumer data-plan workflow", () => {
     expect(api.createExperiment).toHaveBeenCalledWith(
       expect.objectContaining({ data_bundle_id: bundle.id, device_id: device.id }),
     );
-    expect(api.startExperiment).toHaveBeenCalledWith(draft.id);
+    expect(api.startExperiment).toHaveBeenCalledWith(draft.id, false);
     expect(api.createSnapshot).toHaveBeenCalledWith(
       active.id,
       expect.objectContaining({ reported_value: "30", reported_unit: "GB", snapshot_type: "remaining_balance" }),
     );
     expect(screen.getByText("MTN Nigeria · 30 GB")).toBeInTheDocument();
     expect(screen.getByText("Tersugh's Mac")).toBeInTheDocument();
-    expect(screen.getByText("Measurement sensor not running yet.")).toBeInTheDocument();
+    expect(screen.getByText("Waiting for the first measurement.")).toBeInTheDocument();
     expect(screen.queryByText(/Used: 0/)).not.toBeInTheDocument();
     expect(screen.queryByText("measured.interface")).not.toBeInTheDocument();
     expect(screen.queryByText(/experiment/i)).not.toBeInTheDocument();
@@ -199,7 +228,7 @@ describe("consumer data-plan workflow", () => {
     render(<ExperimentWorkspace api={api} />);
 
     await screen.findByText("Current network balance");
-    expect(screen.getByText("25 GB")).toBeInTheDocument();
+    expect(await screen.findByText("25 GB")).toBeInTheDocument();
     fireEvent.change(screen.getByLabelText("Data remaining"), { target: { value: "24.6" } });
     fireEvent.change(screen.getByLabelText("Optional source"), { target: { value: "USSD" } });
     fireEvent.change(screen.getByLabelText("Optional note"), { target: { value: "Checked manually" } });
@@ -221,6 +250,220 @@ describe("consumer data-plan workflow", () => {
     ));
     expect(window.confirm).toHaveBeenCalled();
     expect(screen.queryByText(/ISP balance snapshot|measurement boundary|audit/i)).not.toBeInTheDocument();
+  });
+
+  it("shows real observed usage and an accounted remainder without implying an ISP balance", async () => {
+    const measuredUsage: CurrentExperimentUsage = {
+      ...waitingUsage,
+      status: "active",
+      latest_observation_at: "2026-08-17T00:10:00Z",
+      observed_rx_bytes: 2_000_000_000,
+      observed_tx_bytes: 400_000_000,
+      total_observed_bytes: 2_400_000_000,
+      tracking_baseline_bytes: 30_000_000_000,
+      accounted_remainder_bytes: 27_600_000_000,
+      covered_duration_seconds: 500,
+      eligible_duration_seconds: 600,
+      coverage_percent: 83.3,
+      has_coverage_gaps: true,
+      has_unknown_gaps: true,
+      unknown_duration_seconds: 100,
+      interface_name: "en0",
+      message: "Dachik is observing this Mac.",
+    };
+    const api = createApi({
+      listBundles: vi.fn().mockResolvedValue([bundle]),
+      listExperiments: vi.fn().mockResolvedValue([active]),
+      getCurrentExperimentUsage: vi.fn().mockResolvedValue(measuredUsage),
+    });
+    render(<ExperimentWorkspace api={api} />);
+
+    expect(await screen.findByText("2.4 GB")).toBeInTheDocument();
+    expect(screen.getByText("27.6 GB")).toBeInTheDocument();
+    expect(screen.getByText("Some usage may not have been observed during an earlier tracking gap.")).toBeInTheDocument();
+    expect(screen.getByText(/Starts from the network balance recorded when tracking began/)).toBeInTheDocument();
+    expect(screen.queryByText(/counter|usage interval|measured\.interface/i)).not.toBeInTheDocument();
+  });
+
+  it("shows healthy tracking without a permanent gap warning", async () => {
+    const healthyUsage: CurrentExperimentUsage = {
+      ...waitingUsage,
+      status: "active",
+      latest_observation_at: "2026-08-17T00:10:00Z",
+      observed_rx_bytes: 1_000,
+      observed_tx_bytes: 500,
+      total_observed_bytes: 1_500,
+      tracking_baseline_bytes: 30_000_000_000,
+      accounted_remainder_bytes: 29_999_998_500,
+      service_installed: true,
+      service_expected_to_run: true,
+      collector_run_status: "running",
+      message: "Dachik is observing this Mac.",
+    };
+    const api = createApi({
+      listBundles: vi.fn().mockResolvedValue([bundle]),
+      listExperiments: vi.fn().mockResolvedValue([active]),
+      getCurrentExperimentUsage: vi.fn().mockResolvedValue(healthyUsage),
+    });
+
+    render(<ExperimentWorkspace api={api} />);
+
+    expect(await screen.findByText("Active")).toBeInTheDocument();
+    expect(screen.queryByText(/Some usage may not have been observed/)).not.toBeInTheDocument();
+  });
+
+  it("requires an explicit decision before switching from the current plan", async () => {
+    const api = createApi({
+      listBundles: vi.fn().mockResolvedValue([bundle]),
+      listExperiments: vi.fn().mockResolvedValue([active]),
+    });
+    render(<ExperimentWorkspace api={api} />);
+
+    fireEvent.click(await screen.findByRole("button", { name: "Track another plan" }));
+    expect(screen.getByText("You’re already tracking")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Keep tracking this plan" })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Switch tracking plan" }));
+    await waitForSetup();
+    fillBasicPlan();
+    fireEvent.click(screen.getByRole("button", { name: "Start tracking" }));
+
+    await waitFor(() => expect(api.startExperiment).toHaveBeenCalledWith(draft.id, true));
+  });
+
+  it("shows a consumer plan chooser when active plans are ambiguous", async () => {
+    const secondBundle: DataBundle = {
+      ...bundle,
+      id: "bundle-2",
+      provider_name: "Airtel NG",
+      plan_name: "15 GB plan",
+      allowance_bytes: 15_000_000_000,
+    };
+    const secondExperiment: Experiment = {
+      ...active,
+      id: "experiment-2",
+      data_bundle_id: secondBundle.id,
+    };
+    const ambiguousUsage: CurrentExperimentUsage = {
+      ...waitingUsage,
+      experiment_id: null,
+      status: "multiple_active_plans",
+      message: "Dachik found more than one active data plan. Choose which one to track.",
+    };
+    const api = createApi({
+      listBundles: vi.fn().mockResolvedValue([bundle, secondBundle]),
+      listExperiments: vi.fn().mockResolvedValue([active, secondExperiment]),
+      getCurrentExperimentUsage: vi.fn().mockResolvedValue(ambiguousUsage),
+    });
+    render(<ExperimentWorkspace api={api} />);
+
+    expect(
+      await screen.findByRole("heading", {
+        name: "Dachik found more than one active data plan.",
+      }),
+    ).toBeInTheDocument();
+    expect(screen.getByText("MTN Nigeria · 30 GB")).toBeInTheDocument();
+    expect(screen.getByText("Airtel NG · 15 GB")).toBeInTheDocument();
+    expect(screen.queryByText(/measured\.interface|experiment-/)).not.toBeInTheDocument();
+    fireEvent.click(screen.getAllByRole("button", { name: "Track this plan" })[0]!);
+    await waitFor(() => expect(api.selectCurrentExperiment).toHaveBeenCalledWith(active.id));
+  });
+
+  it("does not describe a known non-attributable period as unknown usage", async () => {
+    const usage: CurrentExperimentUsage = {
+      ...waitingUsage,
+      status: "active",
+      known_inactive_duration_seconds: 600,
+      has_coverage_gaps: false,
+      has_unknown_gaps: false,
+      message: "Dachik is observing this Mac.",
+    };
+    const api = createApi({
+      listBundles: vi.fn().mockResolvedValue([bundle]),
+      listExperiments: vi.fn().mockResolvedValue([active]),
+      getCurrentExperimentUsage: vi.fn().mockResolvedValue(usage),
+    });
+
+    render(<ExperimentWorkspace api={api} />);
+
+    await screen.findByText("Active");
+    expect(screen.queryByText(/Some usage may not have been observed/)).not.toBeInTheDocument();
+  });
+
+  it("shows a simple paused state when the sensor service is stopped", async () => {
+    const pausedUsage: CurrentExperimentUsage = {
+      ...waitingUsage,
+      status: "paused",
+      service_installed: true,
+      service_expected_to_run: false,
+      collector_run_status: "stopped",
+      message: "Tracking is currently paused.",
+    };
+    const api = createApi({
+      listBundles: vi.fn().mockResolvedValue([bundle]),
+      listExperiments: vi.fn().mockResolvedValue([active]),
+      getCurrentExperimentUsage: vi.fn().mockResolvedValue(pausedUsage),
+    });
+
+    render(<ExperimentWorkspace api={api} />);
+
+    expect(await screen.findByText("Paused")).toBeInTheDocument();
+    expect(screen.getByText("Tracking is currently paused.")).toBeInTheDocument();
+    expect(screen.queryByText(/Used: 0/)).not.toBeInTheDocument();
+  });
+
+  it("keeps the starting balance as the accounted baseline after later balance updates", async () => {
+    const initial = snapshot("23.91", "GB");
+    const later = {
+      ...snapshot("20", "GB"),
+      id: "snapshot-later",
+      timestamp_utc: "2026-08-18T00:02:00Z",
+      created_at: "2026-08-18T00:02:00Z",
+    };
+    const usage: CurrentExperimentUsage = {
+      ...waitingUsage,
+      status: "active",
+      latest_observation_at: "2026-08-18T00:01:00Z",
+      observed_rx_bytes: 200_000,
+      observed_tx_bytes: 15_200,
+      total_observed_bytes: 215_200,
+      tracking_baseline_bytes: 23_910_000_000,
+      accounted_remainder_bytes: 23_909_784_800,
+      message: "Dachik is observing this Mac.",
+    };
+    const api = createApi({
+      listBundles: vi.fn().mockResolvedValue([bundle]),
+      listExperiments: vi.fn().mockResolvedValue([active]),
+      listSnapshots: vi.fn().mockResolvedValue([initial, later]),
+      getCurrentExperimentUsage: vi.fn().mockResolvedValue(usage),
+    });
+
+    render(<ExperimentWorkspace api={api} />);
+
+    expect(await screen.findByText("215.2 KB")).toBeInTheDocument();
+    expect(screen.getByText("20 GB")).toBeInTheDocument();
+    expect(screen.getByText("23.91 GB")).toBeInTheDocument();
+    expect(screen.getByText("MTN Nigeria · 30 GB")).toBeInTheDocument();
+  });
+
+  it("shows an unknown remainder when no tracking balance baseline exists", async () => {
+    const usage: CurrentExperimentUsage = {
+      ...waitingUsage,
+      status: "active",
+      observed_rx_bytes: 1_000,
+      observed_tx_bytes: 0,
+      total_observed_bytes: 1_000,
+      message: "Dachik is observing this Mac.",
+    };
+    const api = createApi({
+      listBundles: vi.fn().mockResolvedValue([bundle]),
+      listExperiments: vi.fn().mockResolvedValue([active]),
+      getCurrentExperimentUsage: vi.fn().mockResolvedValue(usage),
+    });
+
+    render(<ExperimentWorkspace api={api} />);
+
+    expect(await screen.findByText("1 KB")).toBeInTheDocument();
+    expect(screen.getByText("Accounted remainder").nextElementSibling).toHaveTextContent("Unknown");
   });
 
   it("shows a friendly failure and never claims tracking started", async () => {

@@ -61,18 +61,6 @@ input {
   color: #647068;
 }
 
-.setup-grid,
-.experiment-area {
-  display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 1rem;
-  margin-top: 2rem;
-}
-
-.experiment-area {
-  grid-template-columns: minmax(14rem, 0.8fr) minmax(0, 2fr);
-}
-
 .panel {
   padding: 1.25rem;
   border: 1px solid #dce5dd;
@@ -155,27 +143,6 @@ button:disabled {
   color: #526158;
   font-size: 0.8rem;
   font-weight: 700;
-}
-
-.experiment-row {
-  display: flex;
-  width: 100%;
-  justify-content: space-between;
-  margin-top: 0.5rem;
-  color: #294637;
-  background: #eaf2eb;
-  text-align: left;
-}
-
-.experiment-summary {
-  display: grid;
-  gap: 0.25rem;
-}
-
-.experiment-summary > span,
-.experiment-summary small {
-  color: #5f6d64;
-  font-size: 0.76rem;
 }
 
 .verification-banner {
@@ -290,6 +257,43 @@ button:disabled {
 
 .sensor-notice span {
   color: #647068;
+}
+
+.usage-summary {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 1rem;
+  margin-top: 1.5rem;
+}
+
+.usage-summary div {
+  display: grid;
+  gap: 0.35rem;
+  padding: 1.25rem;
+  border-radius: 1rem;
+  background: #eaf2eb;
+}
+
+.usage-summary span,
+.usage-summary p {
+  color: #647068;
+}
+
+.usage-summary strong {
+  font-size: clamp(1.5rem, 4vw, 2.3rem);
+}
+
+.usage-summary p {
+  grid-column: 1 / -1;
+  margin: 0;
+  font-size: 0.85rem;
+}
+
+.coverage-warning {
+  padding: 0.75rem 1rem;
+  border-radius: 0.75rem;
+  color: #6d4700;
+  background: #fff0bd;
 }
 
 .text-action {
@@ -441,12 +445,11 @@ h1 {
 }
 
 @media (max-width: 850px) {
-  .setup-grid,
-  .experiment-area {
+  .plan-facts {
     grid-template-columns: 1fr;
   }
 
-  .plan-facts {
+  .usage-summary {
     grid-template-columns: 1fr;
   }
 

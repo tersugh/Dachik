@@ -53,6 +53,32 @@ export interface ISPBalanceSnapshot {
   created_at: string;
 }
 
+export interface CurrentExperimentUsage {
+  experiment_id: string | null;
+  status: "no_active_plan" | "multiple_active_plans" | "waiting" | "active" | "paused" | "interrupted" | "unavailable" | "ambiguous";
+  tracking_started_at: string | null;
+  as_of_timestamp: string;
+  latest_observation_at: string | null;
+  observed_rx_bytes: number | null;
+  observed_tx_bytes: number | null;
+  total_observed_bytes: number | null;
+  tracking_baseline_bytes: number | null;
+  latest_provider_balance_bytes: number | null;
+  accounted_remainder_bytes: number | null;
+  covered_duration_seconds: number;
+  eligible_duration_seconds: number;
+  coverage_percent: number | null;
+  known_inactive_duration_seconds: number;
+  unknown_duration_seconds: number;
+  has_coverage_gaps: boolean;
+  has_unknown_gaps: boolean;
+  interface_name: string | null;
+  service_installed: boolean;
+  service_expected_to_run: boolean;
+  collector_run_status: string | null;
+  message: string;
+}
+
 const NORMAL_DEVELOPMENT_API_URL = "http://127.0.0.1:8765";
 const TEST_API_FALLBACK_URL = "http://127.0.0.1:8876";
 
@@ -143,6 +169,44 @@ function parseSnapshot(value: unknown): ISPBalanceSnapshot {
   return value as unknown as ISPBalanceSnapshot;
 }
 
+function parseCurrentUsage(value: unknown): CurrentExperimentUsage {
+  if (
+    !isRecord(value) ||
+    !["status", "message"].every((key) => typeof value[key] === "string") ||
+    !["no_active_plan", "multiple_active_plans", "waiting", "active", "paused", "interrupted", "unavailable", "ambiguous"].includes(
+      String(value.status),
+    ) ||
+    !isNullableString(value.experiment_id) ||
+    !isNullableString(value.tracking_started_at) ||
+    typeof value.as_of_timestamp !== "string" ||
+    !isNullableString(value.latest_observation_at) ||
+    !isNullableString(value.interface_name) ||
+    !isNullableString(value.collector_run_status) ||
+    ![
+      "observed_rx_bytes",
+      "observed_tx_bytes",
+      "total_observed_bytes",
+      "tracking_baseline_bytes",
+      "latest_provider_balance_bytes",
+      "accounted_remainder_bytes",
+      "coverage_percent",
+    ].every(
+      (key) => value[key] === null || typeof value[key] === "number",
+    ) ||
+    !Number.isSafeInteger(value.covered_duration_seconds) ||
+    !Number.isSafeInteger(value.eligible_duration_seconds) ||
+    !Number.isSafeInteger(value.known_inactive_duration_seconds) ||
+    !Number.isSafeInteger(value.unknown_duration_seconds) ||
+    typeof value.service_installed !== "boolean" ||
+    typeof value.service_expected_to_run !== "boolean" ||
+    typeof value.has_coverage_gaps !== "boolean" ||
+    typeof value.has_unknown_gaps !== "boolean"
+  ) {
+    throw new Error("Invalid current usage response from Dachik service");
+  }
+  return value as unknown as CurrentExperimentUsage;
+}
+
 function parseHealth(value: unknown): HealthResponse {
   if (
     !isRecord(value) ||
@@ -199,8 +263,17 @@ export const dachikApi = {
       method: "POST",
       body: JSON.stringify(payload),
     }),
-  startExperiment: (id: string) =>
-    request(`/api/v1/experiments/${id}/start`, parseExperiment, { method: "POST" }),
+  startExperiment: (id: string, switchCurrent = false) =>
+    request(
+      `/api/v1/experiments/${id}/start${switchCurrent ? "?switch_current=true" : ""}`,
+      parseExperiment,
+      { method: "POST" },
+    ),
+  selectCurrentExperiment: (id: string) =>
+    request("/api/v1/tracking/current", parseExperiment, {
+      method: "POST",
+      body: JSON.stringify({ experiment_id: id }),
+    }),
   completeExperiment: (id: string) =>
     request(`/api/v1/experiments/${id}/complete`, parseExperiment, { method: "POST" }),
   listSnapshots: (experimentId: string) =>
@@ -215,6 +288,8 @@ export const dachikApi = {
       method: "POST",
       body: JSON.stringify(payload),
     }),
+  getCurrentExperimentUsage: () =>
+    request("/api/v1/usage/current-experiment", parseCurrentUsage),
 };
 
 export type DachikApi = typeof dachikApi;

@@ -93,3 +93,49 @@ def test_api_rejects_invalid_bundle_and_missing_relations(client: TestClient) ->
         },
     )
     assert missing.status_code == 404
+
+
+def test_measurement_api_returns_unknown_instead_of_zero_without_observations(
+    client: TestClient,
+) -> None:
+    device = client.post(
+        "/api/v1/devices",
+        json={
+            "hostname": "measurement-api-mac",
+            "display_name": "Measurement API Mac",
+            "operating_system": "macOS",
+            "operating_system_version": None,
+        },
+    ).json()
+    bundle = client.post(
+        "/api/v1/bundles",
+        json={
+            "provider_name": "Synthetic network",
+            "plan_name": "Synthetic plan",
+            "allowance_bytes": 30_000_000_000,
+            "billing_cycle_start": "2026-08-01T00:00:00Z",
+            "billing_cycle_end": "2026-09-01T00:00:00Z",
+            "timezone": "UTC",
+        },
+    ).json()
+    experiment = client.post(
+        "/api/v1/experiments",
+        json={
+            "data_bundle_id": bundle["id"],
+            "device_id": device["id"],
+            "methodology_version": "test-v1",
+        },
+    ).json()
+    client.post(f"/api/v1/experiments/{experiment['id']}/start")
+
+    status = client.get("/api/v1/measurement/status")
+    usage = client.get("/api/v1/usage/current-experiment")
+
+    assert status.status_code == 200
+    assert status.json()["status"] == "waiting"
+    assert status.json()["service_installed"] is False
+    assert status.json()["service_expected_to_run"] is False
+    assert status.json()["collector_run_status"] is None
+    assert usage.status_code == 200
+    assert usage.json()["total_observed_bytes"] is None
+    assert usage.json()["message"] == "Waiting for the first measurement."

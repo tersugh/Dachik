@@ -13,6 +13,7 @@ from backend.app.config import Settings
 from backend.app.database import Database
 from backend.app.schemas import ErrorResponse, HealthResponse
 from backend.app.services import ConflictError, DomainError, NotFoundError
+from collector.service import TEST_ENVIRONMENT, LaunchAgentManager, ServiceStatus
 
 APP_VERSION = "0.1.0"
 # Operational endpoints remain unversioned; future domain APIs belong under /api/v1.
@@ -35,6 +36,11 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         lifespan=lifespan,
     )
     app.state.database = database
+    app.state.sensor_service_manager = (
+        _InactiveServiceManager()
+        if resolved_settings.runtime_environment == TEST_ENVIRONMENT
+        else LaunchAgentManager(settings=resolved_settings)
+    )
     app.add_middleware(
         CORSMiddleware,
         allow_origins=list(resolved_settings.cors_origins),
@@ -70,6 +76,16 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         return HealthResponse(version=APP_VERSION)
 
     return app
+
+
+class _InactiveServiceManager:
+    def status(self) -> ServiceStatus:
+        return ServiceStatus(
+            installed=False,
+            expected_to_run=False,
+            process_running=False,
+            state="stopped",
+        )
 
 
 app = create_app()

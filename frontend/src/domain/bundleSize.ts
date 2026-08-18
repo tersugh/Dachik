@@ -48,3 +48,20 @@ export function formatBundleSize(bytes: number): string {
   const fraction = remainder.toString().padStart(digits, "0").replace(/0+$/, "");
   return `${whole}.${fraction} ${unit}`;
 }
+
+export function formatObservedBytes(bytes: number): string {
+  if (!Number.isSafeInteger(bytes) || bytes < 0) return "Unknown";
+  const value = BigInt(bytes);
+  const units = [
+    ["GB", 1_000_000_000n],
+    ["MB", 1_000_000n],
+    ["KB", 1_000n],
+  ] as const;
+  const [label, divisor] = units.find(([, size]) => value >= size) ?? ["bytes", 1n];
+  const decimalPlaces = label === "GB" ? 2 : label === "bytes" ? 0 : 1;
+  const scale = 10n ** BigInt(decimalPlaces);
+  const rounded = (value * scale + divisor / 2n) / divisor;
+  const whole = rounded / scale;
+  const fraction = (rounded % scale).toString().padStart(decimalPlaces, "0").replace(/0+$/, "");
+  return fraction ? `${whole}.${fraction} ${label}` : `${whole} ${label}`;
+}

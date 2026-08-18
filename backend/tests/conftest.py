@@ -26,6 +26,6 @@ def database(database_path: Path) -> Iterator[Database]:
 
 @pytest.fixture
 def client(database_path: Path) -> Iterator[TestClient]:
-    app = create_app(Settings(database_path=database_path))
+    app = create_app(Settings(database_path=database_path, runtime_environment="test"))
     with TestClient(app) as test_client:
         yield test_client

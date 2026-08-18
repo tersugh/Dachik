@@ -11,6 +11,7 @@ EXPECTED_TABLES = {
     "collector_runs",
     "counter_observations",
     "counter_series",
+    "current_tracking_target",
     "data_audit_experiments",
     "data_bundles",
     "devices",
@@ -34,6 +35,6 @@ def test_initialize_applies_migrations_and_sqlite_policy(database_path: Path) ->
         foreign_keys = connection.execute(text("PRAGMA foreign_keys")).scalar_one()
         journal_mode = connection.execute(text("PRAGMA journal_mode")).scalar_one()
 
-    assert revision == "15ac772ee7c5"
+    assert revision == "71e2b8c4a901"
     assert foreign_keys == 1
     assert journal_mode == "wal"
