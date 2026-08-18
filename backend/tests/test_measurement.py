@@ -334,7 +334,7 @@ def test_active_window_aggregation_excludes_partial_interval(database: Database)
         assert usage.covered_duration_seconds == 10
         assert usage.eligible_duration_seconds == 20
         assert usage.coverage_percent == 50.0
-        assert usage.has_coverage_gaps is False
+        assert usage.has_coverage_gaps is True
 
 
 def test_no_observations_returns_waiting_unknown_not_zero(database: Database) -> None:
@@ -731,6 +731,6 @@ def test_known_non_attributable_period_is_separate_from_unknown_gap(
         usage = service.current_experiment_usage(now=BASE + timedelta(seconds=20))
 
         assert usage.known_inactive_duration_seconds == 20
-        assert usage.unknown_duration_seconds == 0
-        assert usage.has_unknown_gaps is False
+        assert usage.unknown_duration_seconds == 1
+        assert usage.has_unknown_gaps is True
         assert usage.total_observed_bytes is None

@@ -2,6 +2,7 @@ import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/re
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import type {
+  AuditState,
   CurrentExperimentUsage,
   DachikApi,
   DataBundle,
@@ -78,6 +79,52 @@ const waitingUsage: CurrentExperimentUsage = {
   message: "Waiting for the first measurement.",
 };
 
+const auditState: AuditState = {
+  audit_id: active.id,
+  provider_name: "MTN Nigeria",
+  plan_name: "30GB Monthly",
+  original_allowance_bytes: 30_000_000_000,
+  bundle_expiry: "2026-09-16T00:00:00Z",
+  timezone: "Africa/Lagos",
+  audit_status: "in_progress",
+  audit_start: "2026-08-17T00:01:00Z",
+  as_of_timestamp: "2026-08-18T00:00:00Z",
+  initial_tracking_balance_bytes: 23_910_000_000,
+  latest_provider_balance_bytes: 20_000_000_000,
+  total_observed_bytes: 1_000_000_000,
+  accounted_remainder_bytes: 22_910_000_000,
+  usage_exceeds_starting_balance: false,
+  latest_trusted_observation: "2026-08-18T00:00:00Z",
+  sensor_status: "active",
+  measured_duration_seconds: 3600,
+  known_inactive_duration_seconds: 0,
+  unknown_duration_seconds: 0,
+  evidence_coverage_percent: 100,
+  evidence_quality: "excellent",
+  has_unknown_gaps: false,
+  daily: [],
+  hourly: [{
+    start: "2026-08-18T00:00:00Z",
+    end: "2026-08-18T01:00:00Z",
+    observed_rx_bytes: 800_000_000,
+    observed_tx_bytes: 200_000_000,
+    total_observed_bytes: 1_000_000_000,
+    ending_accounted_remainder_bytes: 22_910_000_000,
+    measured_duration_seconds: 3600,
+    known_inactive_duration_seconds: 0,
+    unknown_duration_seconds: 0,
+    state: "measured",
+  }],
+  events: [{
+    timestamp: "2026-08-18T19:54:41.725503Z",
+    event_type: "measurement_resumed",
+    description: "Trusted measurement resumed with a new baseline.",
+    reported_balance_bytes: null,
+    accounted_remainder_bytes: null,
+  }],
+  comparisons: [],
+};
+
 function snapshot(
   reportedValue: string,
   reportedUnit: string,
@@ -114,6 +161,10 @@ function createApi(overrides: Partial<DachikApi> = {}): DachikApi {
       Promise.resolve(snapshot(payload.reported_value, payload.reported_unit, payload.note)),
     ),
     getCurrentExperimentUsage: vi.fn().mockResolvedValue(waitingUsage),
+    getCurrentAudit: vi.fn().mockResolvedValue(auditState),
+    getAudit: vi.fn().mockResolvedValue(auditState),
+    listAudits: vi.fn().mockResolvedValue([]),
+    downloadAudit: vi.fn().mockResolvedValue(new Blob()),
     ...overrides,
   };
 }
@@ -249,7 +300,7 @@ describe("consumer data-plan workflow", () => {
       expect.objectContaining({ reported_value: "0", snapshot_type: "remaining_balance", provenance: "manual" }),
     ));
     expect(window.confirm).toHaveBeenCalled();
-    expect(screen.queryByText(/ISP balance snapshot|measurement boundary|audit/i)).not.toBeInTheDocument();
+    expect(screen.queryByText(/ISP balance snapshot|measurement boundary/i)).not.toBeInTheDocument();
   });
 
   it("shows real observed usage and an accounted remainder without implying an ISP balance", async () => {
@@ -310,6 +361,29 @@ describe("consumer data-plan workflow", () => {
 
     expect(await screen.findByText("Active")).toBeInTheDocument();
     expect(screen.queryByText(/Some usage may not have been observed/)).not.toBeInTheDocument();
+  });
+
+  it("opens a simple continuously available audit view", async () => {
+    const api = createApi({
+      listBundles: vi.fn().mockResolvedValue([bundle]),
+      listExperiments: vi.fn().mockResolvedValue([active]),
+    });
+    render(<ExperimentWorkspace api={api} />);
+
+    fireEvent.click(await screen.findByRole("button", { name: "View audit" }));
+
+    expect(await screen.findByRole("heading", { name: "MTN Nigeria" })).toBeInTheDocument();
+    expect(screen.getByText("Your data audit")).toBeInTheDocument();
+    expect(screen.getAllByText("1 GB")).not.toHaveLength(0);
+    expect(screen.getByText(/Excellent · 100%/)).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Daily breakdown" })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Hourly ledger" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Download audit" })).toBeInTheDocument();
+    expect(screen.getByText("Times shown in Africa/Lagos")).toBeInTheDocument();
+    expect(screen.getAllByText("01:00–02:00")).not.toHaveLength(0);
+    expect(screen.getByText("18 Aug 2026 · 20:54:41")).toBeInTheDocument();
+    expect(screen.queryByText(/2026-08-\d\dT/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/CounterSeries|UsageInterval|measurement_boundary/)).not.toBeInTheDocument();
   });
 
   it("requires an explicit decision before switching from the current plan", async () => {

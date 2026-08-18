@@ -764,6 +764,27 @@ class DachikService:
             if tracking_baseline is not None and total_observed is not None
             else None
         )
+        # The continuous audit engine is the authoritative arithmetic source for
+        # every representation, including the compact active-plan response.
+        from backend.app.audit import AuditEngine
+
+        audit = AuditEngine(self.repository).build(
+            experiment.id, as_of=end, sensor_status=status
+        )
+        rx = audit.observed_rx_bytes if audit.latest_trusted_observation else 0
+        tx = audit.observed_tx_bytes if audit.latest_trusted_observation else 0
+        total_observed = (
+            audit.total_observed_bytes if audit.latest_trusted_observation else None
+        )
+        tracking_baseline = audit.initial_tracking_balance_bytes
+        accounted_remainder = (
+            audit.accounted_remainder_bytes if audit.latest_trusted_observation else None
+        )
+        covered_seconds = audit.measured_duration_seconds
+        eligible_seconds = max(0, int((end - window_start).total_seconds()))
+        coverage = audit.evidence_coverage_percent
+        known_inactive_seconds = audit.known_inactive_duration_seconds
+        unknown_seconds = audit.unknown_duration_seconds
         return schemas.CurrentExperimentUsageResponse(
             experiment_id=experiment.id,
             status=status,
@@ -783,8 +804,8 @@ class DachikService:
             coverage_percent=coverage,
             known_inactive_duration_seconds=known_inactive_seconds,
             unknown_duration_seconds=unknown_seconds,
-            has_coverage_gaps=bool(unknown_gaps) or bool(overlapping_ids),
-            has_unknown_gaps=bool(unknown_gaps) or bool(overlapping_ids),
+            has_coverage_gaps=audit.has_unknown_gaps,
+            has_unknown_gaps=audit.has_unknown_gaps,
             interface_name=interface_name,
             service_installed=lifecycle.installed if lifecycle else False,
             service_expected_to_run=lifecycle.expected_to_run if lifecycle else False,

@@ -58,6 +58,17 @@ def test_data_audit_api_workflow(client: TestClient) -> None:
     assert snapshot.json()["reported_value"] == "14.203"
     assert snapshot.json()["normalized_bytes"] == 14_203_000_000
 
+    audit = client.get(f"/api/v1/audits/{experiment_id}")
+    json_export = client.get(f"/api/v1/audits/{experiment_id}/export.json")
+    csv_export = client.get(f"/api/v1/audits/{experiment_id}/export.csv")
+    pdf_export = client.get(f"/api/v1/audits/{experiment_id}/report.pdf")
+    assert audit.status_code == json_export.status_code == 200
+    assert audit.json()["total_observed_bytes"] == json_export.json()["total_observed_bytes"]
+    assert str(audit.json()["total_observed_bytes"]) in csv_export.text
+    assert pdf_export.status_code == 200
+    assert pdf_export.content.startswith(b"%PDF")
+    assert audit.json()["audit_status"] == "in_progress"
+
     history = client.get("/api/v1/experiments")
     detail = client.get(f"/api/v1/experiments/{experiment_id}")
     snapshots = client.get(f"/api/v1/experiments/{experiment_id}/isp-snapshots")

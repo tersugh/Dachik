@@ -161,6 +161,81 @@ button:disabled {
   margin: 0 auto;
 }
 
+.audit-view {
+  width: min(100%, 76rem);
+  margin: 1.5rem auto 0;
+  padding: clamp(1.5rem, 4vw, 3rem);
+  border: 1px solid rgb(23 63 43 / 12%);
+  border-radius: 2rem;
+  background: rgb(255 255 255 / 92%);
+}
+
+.audit-header h2 {
+  margin: 0;
+  font-size: clamp(2rem, 5vw, 3.5rem);
+}
+
+.quality-pill {
+  display: inline-block;
+  padding: 0.35rem 0.65rem;
+  border-radius: 999px;
+  color: #245c3f;
+  background: #e4f5e9;
+  font-weight: 800;
+}
+
+.audit-summary {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(13rem, 1fr));
+  gap: 0.8rem;
+  margin: 2rem 0;
+}
+
+.audit-summary div,
+.ledger-row {
+  display: grid;
+  gap: 0.3rem;
+  padding: 1rem;
+  border: 1px solid #dce5dd;
+  border-radius: 0.8rem;
+  background: #fbfcfa;
+}
+
+.audit-summary dt,
+.ledger-row span {
+  color: #647068;
+  font-size: 0.82rem;
+}
+
+.audit-summary dd {
+  margin: 0.3rem 0 0;
+  font-size: 1.2rem;
+  font-weight: 800;
+}
+
+.audit-section {
+  margin-top: 2rem;
+}
+
+.ledger-row {
+  margin-top: 0.55rem;
+}
+
+.download-actions,
+.button-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.6rem;
+}
+
+.history-row {
+  display: block;
+  width: 100%;
+  color: #245c3f;
+  background: #eef4ef;
+  text-align: left;
+}
+
 .plan-form,
 .balance-form {
   margin-top: 2rem;

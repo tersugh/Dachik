@@ -227,3 +227,108 @@ class CurrentExperimentUsageResponse(APIModel):
     service_expected_to_run: bool
     collector_run_status: str | None
     message: str
+
+
+EvidenceQuality = Literal["excellent", "good", "limited", "insufficient"]
+AuditStatus = Literal["in_progress", "final"]
+
+
+class AuditBucket(APIModel):
+    start: datetime
+    end: datetime
+    observed_rx_bytes: int
+    observed_tx_bytes: int
+    total_observed_bytes: int
+    starting_accounted_remainder_bytes: int | None
+    ending_accounted_remainder_bytes: int | None
+    measured_duration_seconds: int
+    known_inactive_duration_seconds: int
+    unknown_duration_seconds: int
+    boundary_spanning_bytes: int
+    state: Literal["measured", "known_inactive", "unknown", "mixed"]
+
+
+class AuditEvent(APIModel):
+    timestamp: datetime
+    event_type: Literal[
+        "connection_changed",
+        "measurement_interrupted",
+        "measurement_resumed",
+        "network_balance_updated",
+    ]
+    description: str
+    reported_balance_bytes: int | None = None
+    accounted_remainder_bytes: int | None = None
+
+
+class ISPComparisonWindow(APIModel):
+    start_timestamp: datetime
+    end_timestamp: datetime
+    start_balance_bytes: int
+    end_balance_bytes: int
+    provider_deduction_bytes: int
+    dachik_usage_bytes: int
+    observed_difference_bytes: int
+    measured_duration_seconds: int
+    known_inactive_duration_seconds: int
+    unknown_duration_seconds: int
+    evidence_coverage_percent: float
+    evidence_quality: EvidenceQuality
+    conclusion: str
+
+
+class AuditSnapshotCheckpoint(APIModel):
+    timestamp: datetime
+    reported_value: str
+    reported_unit: str
+    normalized_bytes: int | None
+    accounted_remainder_bytes: int | None
+    note: str | None
+
+
+class AuditState(APIModel):
+    audit_id: str
+    provider_name: str
+    plan_name: str
+    original_allowance_bytes: int
+    bundle_start: datetime
+    bundle_expiry: datetime
+    timezone: str
+    audit_status: AuditStatus
+    audit_start: datetime
+    as_of_timestamp: datetime
+    initial_tracking_balance_bytes: int | None
+    latest_provider_balance_bytes: int | None
+    observed_rx_bytes: int
+    observed_tx_bytes: int
+    total_observed_bytes: int
+    accounted_remainder_bytes: int | None
+    usage_exceeds_starting_balance: bool
+    latest_trusted_observation: datetime | None
+    sensor_status: str
+    measured_duration_seconds: int
+    known_inactive_duration_seconds: int
+    unknown_duration_seconds: int
+    evidence_coverage_percent: float
+    evidence_quality: EvidenceQuality
+    has_unknown_gaps: bool
+    daily: list[AuditBucket]
+    hourly: list[AuditBucket]
+    events: list[AuditEvent]
+    isp_checkpoints: list[AuditSnapshotCheckpoint]
+    comparisons: list[ISPComparisonWindow]
+    methodology_version: str
+    measurement_boundary: str
+    limitations: list[str]
+
+
+class AuditListItem(APIModel):
+    audit_id: str
+    provider_name: str
+    plan_name: str
+    allowance_bytes: int
+    audit_start: datetime | None
+    bundle_expiry: datetime
+    timezone: str
+    status: Literal["draft", "active", "completed", "cancelled"]
+    is_current: bool

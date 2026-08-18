@@ -2,12 +2,14 @@
 
 from collections.abc import Iterator, Sequence
 from datetime import datetime
-from typing import Annotated
+from typing import Annotated, Literal, cast
 
-from fastapi import APIRouter, Depends, HTTPException, Request, status
+from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
 from sqlalchemy.orm import Session
 
 from backend.app import schemas
+from backend.app.audit import AuditEngine
+from backend.app.reports import audit_csv, audit_json, audit_pdf, safe_report_filename
 from backend.app.services import DachikService, SensorLifecycleState
 
 router = APIRouter(prefix="/api/v1")
@@ -135,3 +137,105 @@ def current_experiment_usage(
     if as_of is not None and (as_of.tzinfo is None or as_of.utcoffset() is None):
         raise HTTPException(status_code=422, detail="as_of must include a timezone offset")
     return service.current_experiment_usage(now=as_of, lifecycle=_sensor_lifecycle(request))
+
+
+def _validated_as_of(as_of: datetime | None) -> datetime | None:
+    if as_of is not None and (as_of.tzinfo is None or as_of.utcoffset() is None):
+        raise HTTPException(status_code=422, detail="as_of must include a timezone offset")
+    return as_of
+
+
+def _audit_state(
+    service: DachikService,
+    audit_id: str,
+    *,
+    as_of: datetime | None,
+    sensor_status: str = "historical",
+) -> schemas.AuditState:
+    return AuditEngine(service.repository).build(
+        audit_id, as_of=_validated_as_of(as_of), sensor_status=sensor_status
+    )
+
+
+@router.get("/audits", response_model=list[schemas.AuditListItem])
+def list_audits(service: ServiceDependency) -> list[schemas.AuditListItem]:
+    target = service.repository.get_current_tracking_target()
+    result: list[schemas.AuditListItem] = []
+    for experiment in service.list_experiments():
+        bundle = service.repository.get_bundle(experiment.data_bundle_id)
+        if bundle is None:
+            continue
+        result.append(
+            schemas.AuditListItem(
+                audit_id=experiment.id,
+                provider_name=bundle.provider_name,
+                plan_name=bundle.plan_name,
+                allowance_bytes=bundle.allowance_bytes,
+                audit_start=experiment.started_at,
+                bundle_expiry=bundle.billing_cycle_end,
+                timezone=bundle.timezone,
+                status=cast(
+                    Literal["draft", "active", "completed", "cancelled"],
+                    experiment.status,
+                ),
+                is_current=target is not None and target.experiment_id == experiment.id,
+            )
+        )
+    return result
+
+
+@router.get("/audits/current", response_model=schemas.AuditState)
+def current_audit(
+    request: Request, service: ServiceDependency, as_of: datetime | None = None
+) -> schemas.AuditState:
+    experiment = service.current_experiment()
+    if experiment is None:
+        raise HTTPException(status_code=404, detail="No current data plan")
+    sensor = service.measurement_status(lifecycle=_sensor_lifecycle(request)).status
+    return _audit_state(service, experiment.id, as_of=as_of, sensor_status=sensor)
+
+
+@router.get("/audits/{audit_id}", response_model=schemas.AuditState)
+def get_audit(
+    audit_id: str, service: ServiceDependency, as_of: datetime | None = None
+) -> schemas.AuditState:
+    return _audit_state(service, audit_id, as_of=as_of)
+
+
+@router.get("/audits/{audit_id}/export.json")
+def export_audit_json(
+    audit_id: str, service: ServiceDependency, as_of: datetime | None = None
+) -> Response:
+    state = _audit_state(service, audit_id, as_of=as_of)
+    filename = safe_report_filename(state.provider_name, state.as_of_timestamp, "json")
+    return Response(
+        audit_json(state),
+        media_type="application/json",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
+
+
+@router.get("/audits/{audit_id}/export.csv")
+def export_audit_csv(
+    audit_id: str, service: ServiceDependency, as_of: datetime | None = None
+) -> Response:
+    state = _audit_state(service, audit_id, as_of=as_of)
+    filename = safe_report_filename(state.provider_name, state.as_of_timestamp, "csv")
+    return Response(
+        audit_csv(state),
+        media_type="text/csv; charset=utf-8",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
+
+
+@router.get("/audits/{audit_id}/report.pdf")
+def export_audit_pdf(
+    audit_id: str, service: ServiceDependency, as_of: datetime | None = None
+) -> Response:
+    state = _audit_state(service, audit_id, as_of=as_of)
+    filename = safe_report_filename(state.provider_name, state.as_of_timestamp, "pdf")
+    return Response(
+        audit_pdf(state),
+        media_type="application/pdf",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )

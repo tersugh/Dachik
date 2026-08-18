@@ -2,7 +2,7 @@
 
 **Know where your data goes.**
 
-Dachik is a privacy-first, independent internet data-usage sensor and ISP-accounting comparison tool. It is currently under development. The V1 collector now measures cumulative RX/TX byte counters for one selected local macOS network interface and derives restart-safe usage intervals.
+Dachik is a privacy-first, independent internet data-usage sensor and ISP-accounting comparison tool. It is currently under development. The macOS V1 measures cumulative RX/TX byte counters in the background, tracks a data plan, preserves network-balance checkpoints, and turns deterministic local evidence into a continuous audit that can be viewed or exported at any time.
 
 V1 is a local-first macOS application: a Python collector will supply cumulative interface counters to a deterministic accounting engine, SQLite will persist local data, FastAPI will expose a loopback-only API, and a React browser UI will present the results. See [the architecture](docs/ARCHITECTURE.md) for the authoritative design.
 
@@ -256,8 +256,13 @@ The current local API provides:
 - `GET /api/v1/measurement/status`
 - `GET /api/v1/usage/current-experiment` (accepts an optional timezone-aware
   `as_of` timestamp for deterministic point-in-time accounting)
+- `GET /api/v1/audits` and `GET /api/v1/audits/current`
+- `GET /api/v1/audits/{id}` with optional timezone-aware `as_of`
+- `GET /api/v1/audits/{id}/report.pdf`
+- `GET /api/v1/audits/{id}/export.csv`
+- `GET /api/v1/audits/{id}/export.json`
 
-The browser UI gives users one consumer workflow: describe a data plan, declare its current network-reported balance, and start tracking. When the collector has derived valid intervals, the active-plan screen shows usage observed by Dachik and an accounted remainder. Missing observations remain unknown, known gaps are disclosed, and the provider-reported balance remains separate.
+The browser UI gives users one consumer workflow: describe a data plan, declare its current network-reported balance, start tracking, update the balance their network reports, and open **View audit** at any time. The audit provides point-in-time totals, daily and hourly evidence, exact measurement events, aligned provider-comparison windows, measurement quality, past-audit access, and local PDF/CSV/JSON downloads. Missing observations remain unknown, known non-attributable time stays separate, and provider-reported values never replace Dachik's measured series.
 
 ## Privacy principle
 

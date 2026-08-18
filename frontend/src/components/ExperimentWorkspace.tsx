@@ -15,6 +15,7 @@ import {
   formatObservedBytes,
   type BundleUnit,
 } from "../domain/bundleSize";
+import { AuditView } from "./AuditView";
 
 type ValidityChoice = "7" | "14" | "30" | "custom";
 type StartingBalanceChoice = "new" | "used";
@@ -87,6 +88,7 @@ export function ExperimentWorkspace({ api = dachikApi }: ExperimentWorkspaceProp
   const [startingBalance, setStartingBalance] = useState<StartingBalanceChoice>("new");
   const [showAnotherPlan, setShowAnotherPlan] = useState(false);
   const [showSwitchPrompt, setShowSwitchPrompt] = useState(false);
+  const [showAudit, setShowAudit] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
@@ -302,6 +304,10 @@ export function ExperimentWorkspace({ api = dachikApi }: ExperimentWorkspaceProp
 
   if (loading) return <section className="workspace"><p className="form-notice">Loading your data plan…</p></section>;
 
+  if (showAudit) {
+    return <AuditView api={api} onClose={() => setShowAudit(false)} />;
+  }
+
   const latestBalance = snapshots.at(-1) ?? null;
   const showSetup = !activeExperiment || showAnotherPlan;
   const busy = busyAction !== null;
@@ -424,6 +430,8 @@ export function ExperimentWorkspace({ api = dachikApi }: ExperimentWorkspaceProp
           {usage?.total_observed_bytes !== null && (usage?.status === "paused" || usage?.status === "interrupted") && <p className="coverage-warning">Tracking is currently paused.</p>}
           {usage?.total_observed_bytes !== null && (usage?.status === "unavailable" || usage?.status === "ambiguous") && <p className="coverage-warning">Tracking is currently unavailable.</p>}
           {usage?.has_unknown_gaps && <p className="coverage-warning">Some usage may not have been observed during an earlier tracking gap.</p>}
+
+          <button type="button" onClick={() => setShowAudit(true)}>View audit</button>
 
           <form className="balance-form panel" onSubmit={updateBalance}>
             <h3>Update network balance</h3>

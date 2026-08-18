@@ -79,6 +79,78 @@ export interface CurrentExperimentUsage {
   message: string;
 }
 
+export interface AuditBucket {
+  start: string;
+  end: string;
+  observed_rx_bytes: number;
+  observed_tx_bytes: number;
+  total_observed_bytes: number;
+  ending_accounted_remainder_bytes: number | null;
+  measured_duration_seconds: number;
+  known_inactive_duration_seconds: number;
+  unknown_duration_seconds: number;
+  state: "measured" | "known_inactive" | "unknown" | "mixed";
+}
+
+export interface AuditEvent {
+  timestamp: string;
+  event_type: string;
+  description: string;
+  reported_balance_bytes: number | null;
+  accounted_remainder_bytes: number | null;
+}
+
+export interface AuditComparison {
+  start_timestamp: string;
+  end_timestamp: string;
+  provider_deduction_bytes: number;
+  dachik_usage_bytes: number;
+  observed_difference_bytes: number;
+  evidence_quality: "excellent" | "good" | "limited" | "insufficient";
+  conclusion: string;
+}
+
+export interface AuditState {
+  audit_id: string;
+  provider_name: string;
+  plan_name: string;
+  original_allowance_bytes: number;
+  bundle_expiry: string;
+  timezone: string;
+  audit_status: "in_progress" | "final";
+  audit_start: string;
+  as_of_timestamp: string;
+  initial_tracking_balance_bytes: number | null;
+  latest_provider_balance_bytes: number | null;
+  total_observed_bytes: number;
+  accounted_remainder_bytes: number | null;
+  usage_exceeds_starting_balance: boolean;
+  latest_trusted_observation: string | null;
+  sensor_status: string;
+  measured_duration_seconds: number;
+  known_inactive_duration_seconds: number;
+  unknown_duration_seconds: number;
+  evidence_coverage_percent: number;
+  evidence_quality: "excellent" | "good" | "limited" | "insufficient";
+  has_unknown_gaps: boolean;
+  daily: AuditBucket[];
+  hourly: AuditBucket[];
+  events: AuditEvent[];
+  comparisons: AuditComparison[];
+}
+
+export interface AuditListItem {
+  audit_id: string;
+  provider_name: string;
+  plan_name: string;
+  allowance_bytes: number;
+  audit_start: string | null;
+  bundle_expiry: string;
+  timezone: string;
+  status: "draft" | "active" | "completed" | "cancelled";
+  is_current: boolean;
+}
+
 const NORMAL_DEVELOPMENT_API_URL = "http://127.0.0.1:8765";
 const TEST_API_FALLBACK_URL = "http://127.0.0.1:8876";
 
@@ -207,6 +279,30 @@ function parseCurrentUsage(value: unknown): CurrentExperimentUsage {
   return value as unknown as CurrentExperimentUsage;
 }
 
+function parseAudit(value: unknown): AuditState {
+  if (
+    !isRecord(value) ||
+    !["audit_id", "provider_name", "plan_name", "audit_status", "audit_start", "as_of_timestamp", "evidence_quality", "timezone"].every(
+      (key) => typeof value[key] === "string",
+    ) ||
+    !Array.isArray(value.daily) ||
+    !Array.isArray(value.hourly) ||
+    !Array.isArray(value.events) ||
+    !Array.isArray(value.comparisons) ||
+    !Number.isSafeInteger(value.total_observed_bytes)
+  ) {
+    throw new Error("Invalid audit response from Dachik service");
+  }
+  return value as unknown as AuditState;
+}
+
+function parseAuditListItem(value: unknown): AuditListItem {
+  if (!isRecord(value) || typeof value.audit_id !== "string" || typeof value.provider_name !== "string" || typeof value.timezone !== "string") {
+    throw new Error("Invalid audit history response from Dachik service");
+  }
+  return value as unknown as AuditListItem;
+}
+
 function parseHealth(value: unknown): HealthResponse {
   if (
     !isRecord(value) ||
@@ -290,6 +386,16 @@ export const dachikApi = {
     }),
   getCurrentExperimentUsage: () =>
     request("/api/v1/usage/current-experiment", parseCurrentUsage),
+  getCurrentAudit: () => request("/api/v1/audits/current", parseAudit),
+  getAudit: (id: string) => request(`/api/v1/audits/${id}`, parseAudit),
+  listAudits: () =>
+    request("/api/v1/audits", (value) => parseArray(value, parseAuditListItem, "audit history")),
+  downloadAudit: async (id: string, format: "pdf" | "csv" | "json") => {
+    const suffix = format === "pdf" ? "report.pdf" : `export.${format}`;
+    const response = await fetch(`${apiBaseUrl}/api/v1/audits/${id}/${suffix}`);
+    if (!response.ok) throw new Error("Dachik could not generate the audit download");
+    return response.blob();
+  },
 };
 
 export type DachikApi = typeof dachikApi;

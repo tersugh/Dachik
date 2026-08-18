@@ -181,7 +181,11 @@ coverage % = reliably observed duration within the comparison interval
 
 Only accepted, continuous intervals from the selected authoritative counter series count as reliably observed. Time outside the experiment, collector downtime, incompatible source/scope changes, unresolved resets, excessive sampling gaps, and ambiguous interface periods remain explicit coverage gaps. Overlapping samples count once. Missing intervals are never zero usage and Dachik must not extrapolate them into measured bytes.
 
-The current V1 percentage is specifically accepted measured duration divided by eligible tracking duration. Known non-attributable and unknown durations are exposed separately and neither is counted as measured. This duration ratio is evidence coverage, not a confidence score and not proof of zero bundle use outside the local measurement boundary.
+The original measurement percentage is accepted measured duration divided by eligible tracking duration. The continuous-audit comparison quality below additionally distinguishes deterministically known non-attributable time from unknown time. Neither metric is a confidence score or proof of whole-bundle observation.
+
+For Phase 6 comparison quality, elapsed time is partitioned into measured, known non-attributable, and unknown. Evidence coverage is `(measured + known non-attributable) / eligible duration`; the named bands remain Excellent, Good, Limited, and Insufficient. This evaluates how much of the local Mac boundary is deterministically classified, not whether the entire ISP bundle was observed. Unknown time is the material uncertainty and is never converted into zero usage.
+
+Daily and hourly ledgers use the bundle's IANA timezone. Accepted intervals are never proportionally split across a calendar boundary because that would assume uniform traffic. An interval crossing a boundary is assigned intact to the bucket containing its end timestamp and the bucket exposes the boundary-spanning byte count. Exact audit totals continue to come from the unsplit trusted interval ledger.
 
 Initial user-facing categories are:
 
